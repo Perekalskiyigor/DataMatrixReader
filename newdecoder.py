@@ -1,15 +1,54 @@
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import cv2
 from pylibdmtx.pylibdmtx import decode
 import qrcode
 from PIL import Image, ImageTk
+import numpy as np  # В начале файла (если ещё не импортирован)
+import cam
 
 # Глобальное хранилище считанных данных
 decoded_data = []
 
-def read_datamatrix_whole_image(image_path):
+def preprocess_image(image_path):
     image = cv2.imread(image_path)
+    if image is None:
+        return None
+
+    # Уменьшение до максимального размера 1000px
+    max_dim = 1000
+    h, w = image.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        image = cv2.resize(image, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+
+    # Обрезка лишнего фона
+    image = crop_image(image)
+
+    # Просто серое изображение без инверсии
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    final_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    return final_image
+
+def crop_image(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        all_points = np.vstack(contours)
+        x, y, w, h = cv2.boundingRect(all_points)
+        return image[y:y+h, x:x+w]
+    return image
+
+def read_datamatrix_whole_image(image_path):
+    image = preprocess_image(image_path)
+
+    if image is None:
+        messagebox.showerror("Ошибка", f"Не удалось открыть изображение:\n{image_path}")
+        return []
+
     decoded_objects = decode(image)
 
     if not decoded_objects:
@@ -22,6 +61,12 @@ def read_datamatrix_whole_image(image_path):
         results.append(data)
 
     return results
+
+def convert_bmp_to_png(bmp_path):
+    image = Image.open(bmp_path).convert("RGB")
+    png_path = os.path.splitext(bmp_path)[0] + "_converted.png"
+    image.save(png_path)
+    return png_path
 
 def generate_big_qr(data_list, output_path="big_qr.png"):
     combined_data = ",".join(data_list)
@@ -39,13 +84,15 @@ def generate_big_qr(data_list, output_path="big_qr.png"):
     messagebox.showinfo("Готово", f"✅ QR-код сохранён в {output_path}")
 
 def on_select_image():
+    image_path = cam.capture_image()
     global decoded_data
-    file_path = filedialog.askopenfilename(
-        title="Выберите изображение",
-        filetypes=[("Изображения", "*.png *.jpg *.jpeg *.bmp")]
-    )
+    file_path = image_path
     if not file_path:
         return
+
+    # Конвертация BMP больше не нужна
+    # if file_path.lower().endswith(".bmp"):
+    #     file_path = convert_bmp_to_png(file_path)
 
     decoded_data = read_datamatrix_whole_image(file_path)
 

@@ -51,5 +51,5 @@ def generate_combined_qr(data_list, output_path='combined_qr.png'):
 
 # Пример использования
 if __name__ == "__main__":
-    barcodes_data = read_barcodes("rex.jpg")
+    barcodes_data = read_barcodes("2025-08-14_11-52-46.png")
     generate_combined_qr(barcodes_data)
