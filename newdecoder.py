@@ -1,12 +1,15 @@
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 import cv2
-from pylibdmtx.pylibdmtx import decode
-import qrcode
-from PIL import Image, ImageTk
-import numpy as np  # В начале файла (если ещё не импортирован)
+from pylibdmtx.pylibdmtx import decode, encode
+from PIL import Image, ImageTk, ImageOps
+import numpy as np
 import cam
+import print
+
+printer_name = r"\\sis006179\Godex RT230"
+image_path = r"e:\DEV\DataMatrixReader\big_dm.png"
 
 # Глобальное хранилище считанных данных
 decoded_data = []
@@ -26,7 +29,7 @@ def preprocess_image(image_path):
     # Обрезка лишнего фона
     image = crop_image(image)
 
-    # Просто серое изображение без инверсии
+    # Серое изображение
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     final_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     return final_image
@@ -57,42 +60,44 @@ def read_datamatrix_whole_image(image_path):
 
     results = []
     for obj in decoded_objects:
-        data = obj.data.decode('utf-8')
+        data = obj.data.decode('utf-8', errors='replace')
         results.append(data)
 
     return results
 
-def convert_bmp_to_png(bmp_path):
-    image = Image.open(bmp_path).convert("RGB")
-    png_path = os.path.splitext(bmp_path)[0] + "_converted.png"
-    image.save(png_path)
-    return png_path
+def generate_big_datamatrix(data_list, output_path="big_dm.png", module_scale=10, border_modules=4):
+    """
+    Генерирует один DataMatrix, содержащий объединённые данные (через запятую),
+    масштабирует модули (пиксели) для печати и добавляет белую рамку.
+    """
+    if not data_list:
+        raise ValueError("data_list пуст.")
 
-def generate_big_qr(data_list, output_path="big_qr.png"):
     combined_data = ",".join(data_list)
-    qr = qrcode.QRCode(
-        version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_Q,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(combined_data)
-    qr.make(fit=True)
 
-    img = qr.make_image(fill_color="black", back_color="white")
+    # Кодирование DataMatrix
+    enc = encode(combined_data.encode("utf-8"))
+    # Преобразование в PIL.Image
+    img = Image.frombytes('RGB', (enc.width, enc.height), enc.pixels)
+
+    # ЧБ (на всякий) и масштабирование "модулей" без сглаживания
+    img = img.convert("1")
+    w, h = img.size
+    img = img.resize((w * module_scale, h * module_scale), resample=Image.NEAREST)
+
+    # Белая рамка (в модулях)
+    border_px = border_modules * module_scale
+    img = ImageOps.expand(img, border=border_px, fill="white")
+
     img.save(output_path)
-    messagebox.showinfo("Готово", f"✅ QR-код сохранён в {output_path}")
+    return output_path
 
 def on_select_image():
-    image_path = cam.capture_image()
+    image_path_local = cam.capture_image()
     global decoded_data
-    file_path = image_path
+    file_path = image_path_local
     if not file_path:
         return
-
-    # Конвертация BMP больше не нужна
-    # if file_path.lower().endswith(".bmp"):
-    #     file_path = convert_bmp_to_png(file_path)
 
     decoded_data = read_datamatrix_whole_image(file_path)
 
@@ -100,15 +105,20 @@ def on_select_image():
     for i, item in enumerate(decoded_data, 1):
         text_box.insert(tk.END, f"{i:02d}: {item}\n")
 
-def on_generate_qr():
+def on_generate_dm():
     if not decoded_data:
-        messagebox.showwarning("Ошибка", "Нет считанных данных для QR-кода.")
+        messagebox.showwarning("Ошибка", "Нет считанных данных для DataMatrix.")
         return
-    generate_big_qr(decoded_data)
+    try:
+        out_path = generate_big_datamatrix(decoded_data, output_path=image_path, module_scale=10, border_modules=4)
+        print.print_png_via_mspaint(out_path, printer_name)
+        messagebox.showinfo("Готово", f"✅ DataMatrix сохранён в {out_path} и отправлен на принтер.")
+    except Exception as e:
+        messagebox.showerror("Ошибка генерации", str(e))
 
 # --- Интерфейс tkinter ---
 root = tk.Tk()
-root.title("DataMatrix -> QR Generator")
+root.title("DataMatrix → DataMatrix Generator")
 root.geometry("600x500")
 
 frame = tk.Frame(root)
@@ -117,7 +127,7 @@ frame.pack(pady=10)
 btn_select = tk.Button(frame, text="📷 Считать DataMatrix", command=on_select_image, width=25)
 btn_select.grid(row=0, column=0, padx=10)
 
-btn_generate = tk.Button(frame, text="🧾 Сформировать итоговый QR", command=on_generate_qr, width=25)
+btn_generate = tk.Button(frame, text="🧾 Сформировать итоговый DataMatrix", command=on_generate_dm, width=25)
 btn_generate.grid(row=0, column=1, padx=10)
 
 text_box = tk.Text(root, wrap=tk.WORD, height=25, width=70)
